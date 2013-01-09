@@ -1,10 +1,10 @@
-module Yesod.Auth.Zendesk
-    ( YesodZendesk(..)
-    , ZendeskUser(..)
-    , ZendeskExternalId(..)
-    , Zendesk
-    , getZendesk
-    , zendeskLoginRoute
+module Yesod.Auth.DeskCom
+    ( YesodDeskCom(..)
+    , DeskComUser(..)
+    , DeskComExternalId(..)
+    , DeskCom
+    , getDeskCom
+    , deskComLoginRoute
     ) where
 
 import Control.Applicative ((<$>))
@@ -28,25 +28,25 @@ import qualified Network.Wai as W
 
 
 -- | Type class that you need to implement in order to support
--- Zendesk remote authentication.
+-- Desk.com remote authentication.
 --
 -- /Minimal complete definition:/ all functions are required.
-class YesodAuth master => YesodZendesk master where
-  -- | Shared secret between Zendesk and your site.
-  zendeskToken :: master -> B.ByteString
+class YesodAuth master => YesodDeskCom master where
+  -- | Shared secret between Desk.com and your site.
+  deskComToken :: master -> B.ByteString
 
-  -- | URL on your Zendesk's site where users should be
+  -- | URL on your Desk.com's site where users should be
   -- redirected to when logging in.
-  zendeskAuthURL :: master -> Text
+  deskComAuthURL :: master -> Text
 
-  -- | Gather information that should be given to Zendesk about
-  -- an user.  Please see 'ZendeskUser' for more information
+  -- | Gather information that should be given to Desk.com about
+  -- an user.  Please see 'DeskComUser' for more information
   -- about what these fields mean.
   --
   -- Simple example:
   --
   -- @
-  -- zendeskUserInfo = do
+  -- deskComUserInfo = do
   --   Entity uid user <- 'requireAuth'
   --   return 'def' { 'zuName'  = userName user
   --              , 'zuEmail' = userEmail user }
@@ -55,7 +55,7 @@ class YesodAuth master => YesodZendesk master where
   -- Advanced example:
   --
   -- @
-  -- zendeskUserInfo = do
+  -- deskComUserInfo = do
   --   uid <- 'requireAuthId'
   --   render <- 'getUrlRender'
   --   runDB $ do
@@ -70,27 +70,27 @@ class YesodAuth master => YesodZendesk master where
   --
   -- /Note:/ although I don't recomend this and I don't see any
   -- reason why you would do it, it /is/ possible to use
-  -- 'maybeAuth' instead of 'requireAuth' and login on Zendesk
+  -- 'maybeAuth' instead of 'requireAuth' and login on Desk.com
   -- with some sort of guest user should the user not be logged
   -- in.
-  zendeskUserInfo :: GHandler Zendesk master ZendeskUser
+  deskComUserInfo :: GHandler DeskCom master DeskComUser
 
 
--- | Information about a user that is given to 'Zendesk'.  Please
--- see Zendesk's documentation
+-- | Information about a user that is given to 'DeskCom'.  Please
+-- see Desk.com's documentation
 -- (<http://www.zendesk.com/support/api/remote-authentication>)
 -- in order to see more details of how theses fields are
 -- interpreted.
 --
 -- Only 'zuName' and 'zuEmail' are required.
-data ZendeskUser =
-  ZendeskUser
+data DeskComUser =
+  DeskComUser
     { zuName :: Text
     -- ^ User name, at least two characters. (required)
     , zuEmail :: Text
     -- ^ E-mail address. (required)
-    , zuExternalId :: ZendeskExternalId
-    -- ^ An external (to Zendesk) ID that identifies this user.
+    , zuExternalId :: DeskComExternalId
+    -- ^ An external (to Desk.com) ID that identifies this user.
     -- Defaults to 'UseYesodAuthId'.
     , zuOrganization :: Maybe Text
     -- ^ Organization the user belongs to.
@@ -102,10 +102,10 @@ data ZendeskUser =
 
 -- | Fields 'zuName' and 'zuEmail' are required, so 'def' will be
 -- 'undefined' for them.
-instance Default ZendeskUser where
-  def = ZendeskUser
-          { zuName  = error "ZendeskUser's zuName is a required field."
-          , zuEmail = error "ZendeskUser's zuEmail is a required field."
+instance Default DeskComUser where
+  def = DeskComUser
+          { zuName  = error "DeskComUser's zuName is a required field."
+          , zuEmail = error "DeskComUser's zuEmail is a required field."
           , zuExternalId     = def
           , zuOrganization   = Nothing
           , zuTags           = []
@@ -113,8 +113,8 @@ instance Default ZendeskUser where
           }
 
 
--- | Which external ID should be given to Zendesk.
-data ZendeskExternalId =
+-- | Which external ID should be given to Desk.com.
+data DeskComExternalId =
     UseYesodAuthId
     -- ^ Use the user ID from @persistent@\'s database.  This is
     -- the recommended and default value.
@@ -125,66 +125,66 @@ data ZendeskExternalId =
     deriving (Eq, Ord, Show, Read)
 
 -- | Default is 'UseYesodAuthId'.
-instance Default ZendeskExternalId where
+instance Default DeskComExternalId where
   def = UseYesodAuthId
 
 
 ----------------------------------------------------------------------
 
 
--- | Data type for @yesod-auth-zendesk@\'s subsite.
-data Zendesk = Zendesk
+-- | Data type for @yesod-auth-deskCom@\'s subsite.
+data DeskCom = DeskCom
 
 
--- | Create a new 'Zendesk', use this on your @config/routes@ file.
-getZendesk :: a -> Zendesk
-getZendesk = const Zendesk
+-- | Create a new 'DeskCom', use this on your @config/routes@ file.
+getDeskCom :: a -> DeskCom
+getDeskCom = const DeskCom
 
 
-mkYesodSub "Zendesk"
-  [ClassP ''YesodZendesk [VarT $ mkName "master"]]
+mkYesodSub "DeskCom"
+  [ClassP ''YesodDeskCom [VarT $ mkName "master"]]
   [parseRoutes|
-  / ZendeskLoginR GET
+  / DeskComLoginR GET
 |]
 
 
--- | Redirect the user to Zendesk such that they're already
+-- | Redirect the user to Desk.com such that they're already
 -- logged in when they arrive.  For example, you may use
--- @zendeskLoginRoute@ when the user clicks on a \"Support\" item
+-- @deskComLoginRoute@ when the user clicks on a \"Support\" item
 -- on a menu.
-zendeskLoginRoute :: Route Zendesk
-zendeskLoginRoute = ZendeskLoginR
+deskComLoginRoute :: Route DeskCom
+deskComLoginRoute = DeskComLoginR
 
 
--- | Route used by the Zendesk remote authentication.  Works both
--- when Zendesk call us and when we call them.
-getZendeskLoginR :: YesodZendesk master => GHandler Zendesk master ()
-getZendeskLoginR = do
+-- | Route used by the Desk.com remote authentication.  Works both
+-- when Desk.com call us and when we call them.
+getDeskComLoginR :: YesodDeskCom master => GHandler DeskCom master ()
+getDeskComLoginR = do
   -- Get the timestamp and the request params.
   (timestamp, getParams) <- do
     rawReqParams <- W.queryString <$> waiRequest
     case join $ lookup "timestamp" rawReqParams of
       Nothing -> do
-        -- Doesn't seem to be a request from Zendesk, create our
+        -- Doesn't seem to be a request from Desk.com, create our
         -- own timestamp.
         now <- liftIO getCurrentTime
         let timestamp = B8.pack $ formatTime locale "%s" now
-            locale = error "yesod-auth-zendesk: never here (locale not needed)"
+            locale = error "yesod-auth-deskcom: never here (locale not needed)"
         return (timestamp, [("timestamp", Just timestamp)])
       Just timestamp ->
-        -- Seems to be a request from Zendesk.
+        -- Seems to be a request from Desk.com.
         --
         -- They ask us to reply to them with all the request
         -- parameters they gave us, and at first it seems that
         -- this could create a security problem: we can't confirm
-        -- that the request really came from Zendesk, and a
+        -- that the request really came from Desk.com, and a
         -- malicious person could include a parameter such as
         -- "email=foo@bar.com".  These attacks would foiled by
         -- the hash, however.
         return (timestamp, rawReqParams)
 
   -- Get information about the currently logged user.
-  ZendeskUser {..} <- zendeskUserInfo
+  DeskComUser {..} <- deskComUserInfo
   externalId <- case zuExternalId of
                   UseYesodAuthId -> Just . toPathPiece <$> requireAuthId
                   Explicit x     -> return (Just x)
@@ -200,7 +200,7 @@ getZendeskLoginR = do
                                   . mcons zuOrganization
                                   .  cons tags
                                   . mcons zuRemotePhotoURL
-                                  .  (:)  (zendeskToken y)
+                                  .  (:)  (deskComToken y)
                                   .  (:)  timestamp
                                   $[]
             cons  = (:) . TE.encodeUtf8
@@ -222,5 +222,5 @@ getZendeskLoginR = do
       params = H.renderQuery True {- add question mark -} $
                addParams getParams
 
-  -- Redirect to Zendesk
-  redirect $ zendeskAuthURL y `T.append` TE.decodeUtf8 params
+  -- Redirect to Desk.com
+  redirect $ deskComAuthURL y `T.append` TE.decodeUtf8 params
