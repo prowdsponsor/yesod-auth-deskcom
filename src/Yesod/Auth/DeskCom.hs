@@ -1,5 +1,7 @@
 module Yesod.Auth.DeskCom
     ( YesodDeskCom(..)
+    , deskComCreateCreds
+    , DeskComCredentials
     , DeskComUser(..)
     , DeskComUserId(..)
     , DeskComCustomField
@@ -9,23 +11,24 @@ module Yesod.Auth.DeskCom
     ) where
 
 import Control.Applicative ((<$>))
-import Control.Monad (join)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Default (Default(..))
-import Data.List (intersperse)
+import Data.Monoid ((<>))
 import Data.Text (Text)
-import Data.Time (getCurrentTime, formatTime)
 import Language.Haskell.TH.Syntax (Pred(ClassP), Type(VarT), mkName)
 import Yesod.Auth
 import Yesod.Core
-import qualified Crypto.Hash.MD5 as MD5
+import qualified Crypto.Cipher.AES as AES
+import qualified Crypto.Classes as Crypto
+import qualified Crypto.Hash.SHA1 as SHA1
+import qualified Crypto.HMAC as HMAC
+import qualified Data.Aeson as A
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Char8 as B8
-import qualified Data.ByteString.Base16 as Base16
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Base64.URL as B64URL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import qualified Network.HTTP.Types as H
-import qualified Network.Wai as W
+import qualified Data.Time as TI
 
 
 -- | Type class that you need to implement in order to support
@@ -33,12 +36,11 @@ import qualified Network.Wai as W
 --
 -- /Minimal complete definition:/ everything except for 'deskComTokenTimeout'.
 class YesodAuth master => YesodDeskCom master where
-  -- | The name of your site (e.g., @\"foo\"@ if your site is at
-  -- @http://foo.desk.com/@).
-  deskComSite :: master -> T.Text
-
-  -- | The Multipass API key, a shared secret between Desk.com and your site.
-  deskComApiKey :: master -> T.Text
+  -- | The credentials needed to use Multipass.  Use
+  -- 'deskComCreateCreds'.  We recommend caching the resulting
+  -- 'DeskComCredentials' value on your foundation data type
+  -- since creating it is an expensive operation.
+  deskComCredentials :: master -> DeskComCredentials
 
   -- | Gather information that should be given to Desk.com about
   -- an user.  Please see 'DeskComUser' for more information
@@ -78,9 +80,38 @@ class YesodAuth master => YesodDeskCom master where
 
   -- | Each time we login an user on Desk.com, we create a token.
   -- This function defines how much time the token should be
-  -- valid before expiring.  Defaults to 5 minutes.
-  deskComTokenTimeout :: master -> NominalDiffTime
+  -- valid before expiring.  Should be greater than 0.  Defaults
+  -- to 5 minutes.
+  deskComTokenTimeout :: master -> TI.NominalDiffTime
   deskComTokenTimeout _ = 300 -- seconds
+
+
+-- | Create the credentials data type used by this library.  This
+-- function is relatively expensive (uses SHA1 and AES), so
+-- you'll probably want to cache its result.
+deskComCreateCreds ::
+     T.Text -- ^ The name of your site (e.g., @\"foo\"@ if your
+            -- site is at @http://foo.desk.com/@).
+  -> T.Text -- ^ The domain of your site
+            -- (e.g. @\"foo.desk.com\"@).
+  -> T.Text -- ^ The Multipass API key, a shared secret between
+            -- Desk.com and your site.
+  -> DeskComCredentials
+deskComCreateCreds site domain apiKey = DeskComCredentials site domain aesKey hmacKey
+  where
+    -- Yes, I know, Desk.com's crypto is messy.
+    aesKey  = AES.initKey . B.take 16 . SHA1.hash . TE.encodeUtf8 $ site <> apiKey
+    hmacKey = HMAC.MacKey $ TE.encodeUtf8 apiKey
+
+
+-- | Credentials used to access your Desk.com's Multipass.
+data DeskComCredentials =
+  DeskComCredentials
+    { dccSite    :: !T.Text
+    , dccDomain  :: !T.Text
+    , dccAesKey  :: !AES.Key
+    , dccHmacKey :: !(HMAC.MacKey SHA1.Ctx SHA1.SHA1)
+    }
 
 
 -- | Information about a user that is given to 'DeskCom'.  Please
@@ -171,67 +202,51 @@ deskComLoginRoute = DeskComLoginR
 -- when Desk.com call us and when we call them.
 getDeskComLoginR :: YesodDeskCom master => GHandler DeskCom master ()
 getDeskComLoginR = do
-  -- Get the timestamp and the request params.
-  (timestamp, getParams) <- do
-    rawReqParams <- W.queryString <$> waiRequest
-    case join $ lookup "timestamp" rawReqParams of
-      Nothing -> do
-        -- Doesn't seem to be a request from Desk.com, create our
-        -- own timestamp.
-        now <- liftIO getCurrentTime
-        let timestamp = B8.pack $ formatTime locale "%s" now
-            locale = error "yesod-auth-deskcom: never here (locale not needed)"
-        return (timestamp, [("timestamp", Just timestamp)])
-      Just timestamp ->
-        -- Seems to be a request from Desk.com.
-        --
-        -- They ask us to reply to them with all the request
-        -- parameters they gave us, and at first it seems that
-        -- this could create a security problem: we can't confirm
-        -- that the request really came from Desk.com, and a
-        -- malicious person could include a parameter such as
-        -- "email=foo@bar.com".  These attacks would foiled by
-        -- the hash, however.
-        return (timestamp, rawReqParams)
+  -- Get generic info.
+  y <- getYesod
+  let DeskComCredentials {..} = deskComCredentials y
+
+  -- Get the expires timestamp.
+  expires <- TI.addUTCTime (deskComTokenTimeout y) <$> liftIO TI.getCurrentTime
 
   -- Get information about the currently logged user.
   DeskComUser {..} <- deskComUserInfo
-  externalId <- case duExternalId of
-                  UseYesodAuthId -> Just . toPathPiece <$> requireAuthId
-                  Explicit x     -> return (Just x)
-                  NoExternalId   -> return Nothing
-  let tags = T.concat $ intersperse "," duTags
+  userId <- case duUserId of
+              UseYesodAuthId -> toPathPiece <$> requireAuthId
+              Explicit x     -> return x
 
-  -- Calculate hash
-  y <- getYesod
-  let hash =
-        let toBeHashed = B.concat .  cons duName
-                                  .  cons duEmail
-                                  . mcons externalId
-                                  . mcons duOrganization
-                                  .  cons tags
-                                  . mcons duRemotePhotoURL
-                                  .  (:)  (deskComApiKey y)
-                                  .  (:)  timestamp
-                                  $[]
-            cons  = (:) . TE.encodeUtf8
-            mcons = maybe id cons
-        in Base16.encode $ MD5.hash toBeHashed
-
-  -- Encode information into parameters
-  let addParams = paramT  "name"             (Just duName)
-                . paramT  "email"            (Just duEmail)
-                . paramBS "hash"             (Just hash)
-                . paramT  "external_id"      externalId
-                . paramT  "organization"     duOrganization
-                . paramT  "tags"             (Just tags)
-                . paramT  "remote_photo_url" duRemotePhotoURL
-        where
-          paramT name = paramBS name . fmap TE.encodeUtf8
-          paramBS name (Just t) | not (B.null t) = (:) (name, Just t)
-          paramBS _    _                         = id
-      params = H.renderQuery True {- add question mark -} $
-               addParams getParams
+  -- Create Multipass token.
+  let toStrict = B.concat . BL.toChunks
+      deskComEncode
+        = fst . B.spanEnd (== 61)           -- remove trailing '=' per Desk.com
+        . B64URL.encode                     -- base64url encoding
+      encrypt
+        = deskComEncode                     -- encode as modified base64url
+        . AES.encryptCBC dccAesKey blankIV  -- encrypt with AES128-CBC
+        . toStrict . A.encode . A.object    -- encode as JSON
+      sign
+        = deskComEncode . Crypto.encode     -- encode as modified base64-url
+        . HMAC.hmac' dccHmacKey             -- sign using HMAC-SHA1
+      multipass = encrypt $
+                    "uid"            A..= userId  :
+                    "expires"        A..= expires :
+                    "customer_email" A..= duEmail :
+                    "customer_name"  A..= duName  :
+                    [ "to" A..= to | Just to <- return duRedirectTo ] ++
+                    [ ("customer_custom_" <> k) A..= v | (k, v) <- duCustomFields ]
+      signature = sign multipass
 
   -- Redirect to Desk.com
-  redirect $ deskComAuthURL y `T.append` TE.decodeUtf8 params
+  redirect $ T.concat [ "http://"
+                      , dccDomain
+                      , "/customer/authentication/multipass/callback?multipass="
+                      , TE.decodeUtf8 multipass
+                      , "&signature="
+                      , TE.decodeUtf8 signature
+                      ]
+
+
+-- | A blank IV consisting of NUL bytes.  Yes, Desk.com's messy
+-- crypto avoids using IVs!
+blankIV :: AES.IV
+blankIV = AES.IV (B.replicate 16 0)

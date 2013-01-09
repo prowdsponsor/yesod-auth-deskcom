@@ -30,20 +30,21 @@ Source-repository head
 Library
   hs-source-dirs: src
 
-  Build-depends:   base         >= 4.3     && < 5
-                 , time         >= 1.1     && < 2
+  Build-depends:   base              >= 4.3     && < 5
+                 , time              >= 1.1     && < 2
                  , template-haskell
-                 , transformers >= 0.1.3   && < 0.4
-                 , bytestring
-                 , text         >= 0.7     && < 0.12
+                 , transformers      >= 0.1.3   && < 0.4
+                 , bytestring        >= 0.9
+                 , text              >= 0.7     && < 0.12
                  , data-default
-                 , base16-bytestring
-                 , cryptohash   >= 0.6
-                 , http-types
+                 , base64-bytestring >= 1.0
+                 , cryptohash        >= 0.6
+                 , cipher-aes        >= 0.1
+                 , crypto-api        >= 0.10
+                 , aeson             >= 0.6
                  , http-conduit
-                 , wai
-                 , yesod-core   == 1.1.*
-                 , yesod-auth   == 1.1.*
+                 , yesod-core        == 1.1.*
+                 , yesod-auth        == 1.1.*
 
   Exposed-modules: Yesod.Auth.DeskCom
   Extensions:
