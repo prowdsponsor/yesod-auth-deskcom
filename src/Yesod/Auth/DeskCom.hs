@@ -1,7 +1,8 @@
 module Yesod.Auth.DeskCom
     ( YesodDeskCom(..)
     , DeskComUser(..)
-    , DeskComExternalId(..)
+    , DeskComUserId(..)
+    , DeskComCustomField
     , DeskCom
     , getDeskCom
     , deskComLoginRoute
@@ -30,14 +31,14 @@ import qualified Network.Wai as W
 -- | Type class that you need to implement in order to support
 -- Desk.com remote authentication.
 --
--- /Minimal complete definition:/ all functions are required.
+-- /Minimal complete definition:/ everything except for 'deskComTokenTimeout'.
 class YesodAuth master => YesodDeskCom master where
-  -- | Shared secret between Desk.com and your site.
-  deskComToken :: master -> B.ByteString
+  -- | The name of your site (e.g., @\"foo\"@ if your site is at
+  -- @http://foo.desk.com/@).
+  deskComSite :: master -> T.Text
 
-  -- | URL on your Desk.com's site where users should be
-  -- redirected to when logging in.
-  deskComAuthURL :: master -> Text
+  -- | The Multipass API key, a shared secret between Desk.com and your site.
+  deskComApiKey :: master -> T.Text
 
   -- | Gather information that should be given to Desk.com about
   -- an user.  Please see 'DeskComUser' for more information
@@ -48,8 +49,8 @@ class YesodAuth master => YesodDeskCom master where
   -- @
   -- deskComUserInfo = do
   --   Entity uid user <- 'requireAuth'
-  --   return 'def' { 'zuName'  = userName user
-  --              , 'zuEmail' = userEmail user }
+  --   return 'def' { 'duName'  = userName user
+  --              , 'duEmail' = userEmail user }
   -- @
   --
   -- Advanced example:
@@ -61,10 +62,10 @@ class YesodAuth master => YesodDeskCom master where
   --   runDB $ do
   --     Just user <- get uid
   --     Just org  <- get (userOrganization user)
-  --     return 'def' { 'zuName'           = userName user
-  --                , 'zuEmail'          = userEmail user
-  --                , 'zuOrganization'   = Just (organizationName org)
-  --                , 'zuRemotePhotoURL' = Just (render $ UserPhotoR uid)
+  --     return 'def' { 'duName'           = userName user
+  --                , 'duEmail'          = userEmail user
+  --                , 'duOrganization'   = Just (organizationName org)
+  --                , 'duRemotePhotoURL' = Just (render $ UserPhotoR uid)
   --                }
   -- @
   --
@@ -75,6 +76,12 @@ class YesodAuth master => YesodDeskCom master where
   -- in.
   deskComUserInfo :: GHandler DeskCom master DeskComUser
 
+  -- | Each time we login an user on Desk.com, we create a token.
+  -- This function defines how much time the token should be
+  -- valid before expiring.  Defaults to 5 minutes.
+  deskComTokenTimeout :: master -> NominalDiffTime
+  deskComTokenTimeout _ = 300 -- seconds
+
 
 -- | Information about a user that is given to 'DeskCom'.  Please
 -- see Desk.com's documentation
@@ -82,51 +89,55 @@ class YesodAuth master => YesodDeskCom master where
 -- in order to see more details of how theses fields are
 -- interpreted.
 --
--- Only 'zuName' and 'zuEmail' are required.
+-- Only 'duName' and 'duEmail' are required.  We suggest using
+-- 'def'.
 data DeskComUser =
   DeskComUser
-    { zuName :: Text
+    { duName :: Text
     -- ^ User name, at least two characters. (required)
-    , zuEmail :: Text
+    , duEmail :: Text
     -- ^ E-mail address. (required)
-    , zuExternalId :: DeskComExternalId
-    -- ^ An external (to Desk.com) ID that identifies this user.
-    -- Defaults to 'UseYesodAuthId'.
-    , zuOrganization :: Maybe Text
-    -- ^ Organization the user belongs to.
-    , zuTags :: [Text]
-    -- ^ List of tags.
-    , zuRemotePhotoURL :: Maybe Text
-    -- ^ Public URL with the user's profile picture.
+    , duUserId :: DeskComUserId
+    -- ^ Desk.com expects an string to be used as the ID of the
+    -- user on their system.  Defaults to 'UseYesodAuthId'.
+    , duCustomFields :: [DeskComCustomField]
+    -- ^ Custom fields to be set.
+    , duRedirectTo :: Maybe Text
+    -- ^ When @Just url@, forces the user to be redirected to
+    -- @url@ after being logged in.  Otherwise, the user is
+    -- redirected either to the page they were trying to view (if
+    -- any) or to your portal page at Desk.com.
     } deriving (Eq, Ord, Show, Read)
 
--- | Fields 'zuName' and 'zuEmail' are required, so 'def' will be
+-- | Fields 'duName' and 'duEmail' are required, so 'def' will be
 -- 'undefined' for them.
 instance Default DeskComUser where
   def = DeskComUser
-          { zuName  = error "DeskComUser's zuName is a required field."
-          , zuEmail = error "DeskComUser's zuEmail is a required field."
-          , zuExternalId     = def
-          , zuOrganization   = Nothing
-          , zuTags           = []
-          , zuRemotePhotoURL = Nothing
+          { duName         = req "duName"
+          , duEmail        = req "duEmail"
+          , duUserId       = def
+          , duCustomFields = []
+          , duRedirectTo   = Nothing
           }
+    where req fi = error $ "DeskComUser's " ++ fi ++ " is a required field."
 
 
 -- | Which external ID should be given to Desk.com.
-data DeskComExternalId =
+data DeskComUserId =
     UseYesodAuthId
     -- ^ Use the user ID from @persistent@\'s database.  This is
     -- the recommended and default value.
   | Explicit Text
     -- ^ Use this given value.
-  | NoExternalId
-    -- ^ Do not give an external ID.
     deriving (Eq, Ord, Show, Read)
 
 -- | Default is 'UseYesodAuthId'.
-instance Default DeskComExternalId where
+instance Default DeskComUserId where
   def = UseYesodAuthId
+
+
+-- | The value of a custom customer field as @(key, value)@.
+type DeskComCustomField = (Text, Text)
 
 
 ----------------------------------------------------------------------
@@ -185,22 +196,22 @@ getDeskComLoginR = do
 
   -- Get information about the currently logged user.
   DeskComUser {..} <- deskComUserInfo
-  externalId <- case zuExternalId of
+  externalId <- case duExternalId of
                   UseYesodAuthId -> Just . toPathPiece <$> requireAuthId
                   Explicit x     -> return (Just x)
                   NoExternalId   -> return Nothing
-  let tags = T.concat $ intersperse "," zuTags
+  let tags = T.concat $ intersperse "," duTags
 
   -- Calculate hash
   y <- getYesod
   let hash =
-        let toBeHashed = B.concat .  cons zuName
-                                  .  cons zuEmail
+        let toBeHashed = B.concat .  cons duName
+                                  .  cons duEmail
                                   . mcons externalId
-                                  . mcons zuOrganization
+                                  . mcons duOrganization
                                   .  cons tags
-                                  . mcons zuRemotePhotoURL
-                                  .  (:)  (deskComToken y)
+                                  . mcons duRemotePhotoURL
+                                  .  (:)  (deskComApiKey y)
                                   .  (:)  timestamp
                                   $[]
             cons  = (:) . TE.encodeUtf8
@@ -208,13 +219,13 @@ getDeskComLoginR = do
         in Base16.encode $ MD5.hash toBeHashed
 
   -- Encode information into parameters
-  let addParams = paramT  "name"             (Just zuName)
-                . paramT  "email"            (Just zuEmail)
+  let addParams = paramT  "name"             (Just duName)
+                . paramT  "email"            (Just duEmail)
                 . paramBS "hash"             (Just hash)
                 . paramT  "external_id"      externalId
-                . paramT  "organization"     zuOrganization
+                . paramT  "organization"     duOrganization
                 . paramT  "tags"             (Just tags)
-                . paramT  "remote_photo_url" zuRemotePhotoURL
+                . paramT  "remote_photo_url" duRemotePhotoURL
         where
           paramT name = paramBS name . fmap TE.encodeUtf8
           paramBS name (Just t) | not (B.null t) = (:) (name, Just t)
