@@ -119,9 +119,8 @@ data DeskComCredentials =
 
 -- | Information about a user that is given to 'DeskCom'.  Please
 -- see Desk.com's documentation
--- (<http://www.zendesk.com/support/api/remote-authentication>)
--- in order to see more details of how theses fields are
--- interpreted.
+-- (<http://dev.desk.com/docs/portal/multipass>) in order to see
+-- more details of how theses fields are interpreted.
 --
 -- Only 'duName' and 'duEmail' are required.  We suggest using
 -- 'def'.
