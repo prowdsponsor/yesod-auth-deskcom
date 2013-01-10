@@ -16,6 +16,7 @@ import Data.Default (Default(..))
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import Language.Haskell.TH.Syntax (Pred(ClassP), Type(VarT), mkName)
+import Network.HTTP.Types (renderSimpleQuery)
 import Yesod.Auth
 import Yesod.Core
 import qualified Crypto.Cipher.AES as AES
@@ -238,14 +239,13 @@ getDeskComLoginR = do
                     [ "to" A..= to | Just to <- return duRedirectTo ] ++
                     [ ("customer_" <> k) A..= v | (k, v) <- duCustomFields ]
       signature = sign multipass
+      query = [("multipass", multipass), ("signature", signature)]
 
   -- Redirect to Desk.com
   redirect $ T.concat [ "http://"
                       , dccDomain
-                      , "/customer/authentication/multipass/callback?multipass="
-                      , TE.decodeUtf8 multipass
-                      , "&signature="
-                      , TE.decodeUtf8 signature
+                      , "/customer/authentication/multipass/callback?"
+                      , TE.decodeUtf8 (renderSimpleQuery False query)
                       ]
 
 

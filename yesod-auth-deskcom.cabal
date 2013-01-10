@@ -43,6 +43,7 @@ Library
                  , crypto-api        >= 0.10
                  , aeson             >= 0.6
                  , http-conduit
+                 , http-types        >= 0.7
                  , yesod-core        == 1.1.*
                  , yesod-auth        == 1.1.*
 
