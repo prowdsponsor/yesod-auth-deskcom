@@ -22,6 +22,7 @@ import qualified Crypto.Cipher.AES as AES
 import qualified Crypto.Classes as Crypto
 import qualified Crypto.Hash.SHA1 as SHA1
 import qualified Crypto.HMAC as HMAC
+import qualified Crypto.Padding as Padding
 import qualified Data.Aeson as A
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
@@ -223,6 +224,7 @@ getDeskComLoginR = do
       encrypt
         = deskComEncode                     -- encode as modified base64url
         . AES.encryptCBC dccAesKey blankIV  -- encrypt with AES128-CBC
+        . Padding.padPKCS5 16               -- PKCS#5 padding
         . toStrict . A.encode . A.object    -- encode as JSON
       sign
         = deskComEncode . Crypto.encode     -- encode as modified base64-url
