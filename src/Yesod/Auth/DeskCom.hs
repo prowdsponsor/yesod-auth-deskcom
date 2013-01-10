@@ -103,7 +103,7 @@ deskComCreateCreds ::
 deskComCreateCreds site domain apiKey = DeskComCredentials site domain aesKey hmacKey
   where
     -- Yes, I know, Desk.com's crypto is messy.
-    aesKey  = AES.initKey . B.take 16 . SHA1.hash . TE.encodeUtf8 $ site <> apiKey
+    aesKey  = AES.initKey . B.take 16 . SHA1.hash . TE.encodeUtf8 $ apiKey <> site
     hmacKey = HMAC.MacKey $ TE.encodeUtf8 apiKey
 
 
