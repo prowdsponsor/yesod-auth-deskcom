@@ -8,6 +8,7 @@ module Yesod.Auth.DeskCom
     , DeskCom
     , getDeskCom
     , deskComLoginRoute
+    , deskComMaybeLoginRoute
     ) where
 
 import Control.Applicative ((<$>))
@@ -52,8 +53,8 @@ class YesodAuth master => YesodDeskCom master where
   -- Simple example:
   --
   -- @
-  -- deskComUserInfo = do
-  --   Entity uid user <- 'requireAuth'
+  -- deskComUserInfo uid = do
+  --   user <- runDB $ get uid
   --   return 'def' { 'duName'  = userName user
   --              , 'duEmail' = userEmail user }
   -- @
@@ -61,8 +62,7 @@ class YesodAuth master => YesodDeskCom master where
   -- Advanced example:
   --
   -- @
-  -- deskComUserInfo = do
-  --   uid <- 'requireAuthId'
+  -- deskComUserInfo uid = do
   --   render <- 'getUrlRender'
   --   runDB $ do
   --     Just user <- get uid
@@ -79,7 +79,7 @@ class YesodAuth master => YesodDeskCom master where
   -- 'maybeAuth' instead of 'requireAuth' and login on Desk.com
   -- with some sort of guest user should the user not be logged
   -- in.
-  deskComUserInfo :: GHandler DeskCom master DeskComUser
+  deskComUserInfo :: AuthId master -> GHandler DeskCom master DeskComUser
 
   -- | Each time we login an user on Desk.com, we create a token.
   -- This function defines how much time the token should be
@@ -189,22 +189,53 @@ getDeskCom = const DeskCom
 mkYesodSub "DeskCom"
   [ClassP ''YesodDeskCom [VarT $ mkName "master"]]
   [parseRoutes|
-  / DeskComLoginR GET
+  /  DeskComLoginR GET
+  /m DeskComMaybeLoginR GET
 |]
 
 
 -- | Redirect the user to Desk.com such that they're already
 -- logged in when they arrive.  For example, you may use
--- @deskComLoginRoute@ when the user clicks on a \"Support\" item
--- on a menu.
+-- @deskComLoginRoute@ as the login URL on Multipass config.
 deskComLoginRoute :: Route DeskCom
 deskComLoginRoute = DeskComLoginR
 
 
--- | Route used by the Desk.com remote authentication.  Works both
--- when Desk.com call us and when we call them.
+-- | If the user is logged in, redirect them to Desk.com such
+-- that they're already logged in when they arrive (same as
+-- 'deskComLoginRoute').  Otherwise, redirect them to Desk.com
+-- without asking for credentials. For example, you may use
+-- @deskComMaybeLoginRoute@ when the user clicks on a \"Support\"
+-- item on a menu.
+deskComMaybeLoginRoute :: Route DeskCom
+deskComMaybeLoginRoute = DeskComMaybeLoginR
+
+
+-- | Route used by the Desk.com remote authentication.  Works
+-- both when Desk.com call us and when we call them.  Forces user
+-- to be logged in.
 getDeskComLoginR :: YesodDeskCom master => GHandler DeskCom master ()
-getDeskComLoginR = do
+getDeskComLoginR = requireAuthId >>= redirectToMultipass
+
+
+-- | Same as 'getDeskComLoginR' if the user is logged in,
+-- otherwise redirect to the Desk.com portal without asking for
+-- credentials.
+getDeskComMaybeLoginR :: YesodDeskCom master => GHandler DeskCom master ()
+getDeskComMaybeLoginR = maybeAuthId >>= maybe redirectToPortal redirectToMultipass
+
+
+-- | Redirect the user to the main Desk.com portal.
+redirectToPortal :: YesodDeskCom master => GHandler DeskCom master ()
+redirectToPortal = do
+  y <- getYesod
+  let DeskComCredentials {..} = deskComCredentials y
+  redirect $ T.concat [ "http://", dccDomain, "/" ]
+
+
+-- | Redirect the user to the multipass login.
+redirectToMultipass :: YesodDeskCom master => AuthId master -> GHandler DeskCom master ()
+redirectToMultipass uid = do
   -- Get generic info.
   y <- getYesod
   let DeskComCredentials {..} = deskComCredentials y
@@ -213,7 +244,7 @@ getDeskComLoginR = do
   expires <- TI.addUTCTime (deskComTokenTimeout y) <$> liftIO TI.getCurrentTime
 
   -- Get information about the currently logged user.
-  DeskComUser {..} <- deskComUserInfo
+  DeskComUser {..} <- deskComUserInfo uid
   userId <- case duUserId of
               UseYesodAuthId -> toPathPiece <$> requireAuthId
               Explicit x     -> return x
