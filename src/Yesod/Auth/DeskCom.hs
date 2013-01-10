@@ -27,6 +27,7 @@ import qualified Crypto.Padding as Padding
 import qualified Data.Aeson as A
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Base64.URL as B64URL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -229,7 +230,7 @@ getDeskComLoginR = do
         . Padding.padPKCS5 16               -- PKCS#5 padding
         . toStrict . A.encode . A.object    -- encode as JSON
       sign
-        = deskComEncode . Crypto.encode     -- encode as modified base64-url
+        = B64.encode . Crypto.encode        -- encode as normal base64 (why??? =[)
         . HMAC.hmac' dccHmacKey             -- sign using HMAC-SHA1
       multipass = encrypt $
                     "uid"            A..= userId  :
