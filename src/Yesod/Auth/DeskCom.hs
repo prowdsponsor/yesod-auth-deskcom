@@ -169,6 +169,7 @@ instance Default DeskComUserId where
 
 
 -- | The value of a custom customer field as @(key, value)@.
+-- Note that you have prefix your @key@ with @\"custom_\"@.
 type DeskComCustomField = (Text, Text)
 
 
@@ -235,7 +236,7 @@ getDeskComLoginR = do
                     "customer_email" A..= duEmail :
                     "customer_name"  A..= duName  :
                     [ "to" A..= to | Just to <- return duRedirectTo ] ++
-                    [ ("customer_custom_" <> k) A..= v | (k, v) <- duCustomFields ]
+                    [ ("customer_" <> k) A..= v | (k, v) <- duCustomFields ]
       signature = sign multipass
 
   -- Redirect to Desk.com
