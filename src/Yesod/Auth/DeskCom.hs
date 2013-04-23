@@ -83,6 +83,9 @@ class YesodAuthPersist master => YesodDeskCom master where
   -- in.
   deskComUserInfo :: AuthId master -> HandlerT master IO DeskComUser
 
+  -- | Get a random 16-byte @ByteString@ to use as the IV.
+  deskComRandomIV :: HandlerT master IO B.ByteString
+
   -- | Each time we login an user on Desk.com, we create a token.
   -- This function defines how much time the token should be
   -- valid before expiring.  Should be greater than 0.  Defaults
@@ -247,8 +250,8 @@ redirectToMultipass uid = do
 
   -- FIXME Desk.com now actually does have IV support. We should use it... but
   -- I'm tired.
-  let ivBS = B.replicate 16 0
-      iv = AES.IV ivBS
+  ivBS <- deskComRandomIV
+  let iv = AES.IV ivBS
 
   -- Create Multipass token.
   let toStrict = B.concat . BL.toChunks
