@@ -245,6 +245,11 @@ redirectToMultipass uid = do
               UseYesodAuthId -> toPathPiece <$> requireAuthId
               Explicit x     -> return x
 
+  -- FIXME Desk.com now actually does have IV support. We should use it... but
+  -- I'm tired.
+  let ivBS = B.replicate 16 0
+      iv = AES.IV ivBS
+
   -- Create Multipass token.
   let toStrict = B.concat . BL.toChunks
       deskComEncode
@@ -252,7 +257,8 @@ redirectToMultipass uid = do
         . B64URL.encode                     -- base64url encoding
       encrypt
         = deskComEncode                     -- encode as modified base64url
-        . AES.encryptCBC dccAesKey blankIV  -- encrypt with AES128-CBC
+        . AES.encryptCBC dccAesKey iv       -- encrypt with AES128-CBC
+        . (ivBS <>)
         . Padding.padPKCS5 16               -- PKCS#5 padding
         . toStrict . A.encode . A.object    -- encode as JSON
       sign
@@ -268,15 +274,12 @@ redirectToMultipass uid = do
       signature = sign multipass
       query = [("multipass", multipass), ("signature", signature)]
 
+  $logError $ TE.decodeUtf8 $ toStrict $ A.encode $ A.object multipass'
+  $logError $ TE.decodeUtf8 $ Padding.padPKCS5 16 $ toStrict $ A.encode $ A.object multipass'
+
   -- Redirect to Desk.com
   redirect $ T.concat [ "http://"
                       , dccDomain
                       , "/customer/authentication/multipass/callback?"
                       , TE.decodeUtf8 (renderSimpleQuery False query)
                       ]
-
-
--- | A blank IV consisting of NUL bytes.  Yes, Desk.com's messy
--- crypto avoids using IVs!
-blankIV :: AES.IV
-blankIV = AES.IV (B.replicate 16 0)
