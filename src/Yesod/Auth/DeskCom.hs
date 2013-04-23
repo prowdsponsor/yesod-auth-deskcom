@@ -274,9 +274,6 @@ redirectToMultipass uid = do
       signature = sign multipass
       query = [("multipass", multipass), ("signature", signature)]
 
-  $logError $ TE.decodeUtf8 $ toStrict $ A.encode $ A.object multipass'
-  $logError $ TE.decodeUtf8 $ Padding.padPKCS5 16 $ toStrict $ A.encode $ A.object multipass'
-
   -- Redirect to Desk.com
   redirect $ T.concat [ "http://"
                       , dccDomain
