@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module Yesod.Auth.DeskCom
     ( YesodDeskCom(..)
     , deskComCreateCreds
@@ -33,13 +34,14 @@ import qualified Data.ByteString.Base64.URL as B64URL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Time as TI
-
+import Yesod.Auth.DeskCom.Data
+import Database.Persist (Key)
 
 -- | Type class that you need to implement in order to support
 -- Desk.com remote authentication.
 --
 -- /Minimal complete definition:/ everything except for 'deskComTokenTimeout'.
-class YesodAuth master => YesodDeskCom master where
+class YesodAuthPersist master => YesodDeskCom master where
   -- | The credentials needed to use Multipass.  Use
   -- 'deskComCreateCreds'.  We recommend caching the resulting
   -- 'DeskComCredentials' value on your foundation data type
@@ -79,7 +81,10 @@ class YesodAuth master => YesodDeskCom master where
   -- 'maybeAuth' instead of 'requireAuth' and login on Desk.com
   -- with some sort of guest user should the user not be logged
   -- in.
-  deskComUserInfo :: AuthId master -> GHandler DeskCom master DeskComUser
+  deskComUserInfo :: AuthId master -> HandlerT master IO DeskComUser
+
+  -- | Get a random 16-byte @ByteString@ to use as the IV.
+  deskComRandomIV :: HandlerT master IO B.ByteString
 
   -- | Each time we login an user on Desk.com, we create a token.
   -- This function defines how much time the token should be
@@ -88,6 +93,8 @@ class YesodAuth master => YesodDeskCom master where
   deskComTokenTimeout :: master -> TI.NominalDiffTime
   deskComTokenTimeout _ = 300 -- seconds
 
+instance YesodDeskCom master => YesodSubDispatch DeskCom (HandlerT master IO) where
+    yesodSubDispatch = $(mkYesodSubDispatch resourcesDeskCom)
 
 -- | Create the credentials data type used by this library.  This
 -- function is relatively expensive (uses SHA1 and AES), so
@@ -177,21 +184,9 @@ type DeskComCustomField = (Text, Text)
 ----------------------------------------------------------------------
 
 
--- | Data type for @yesod-auth-deskCom@\'s subsite.
-data DeskCom = DeskCom
-
-
 -- | Create a new 'DeskCom', use this on your @config/routes@ file.
 getDeskCom :: a -> DeskCom
 getDeskCom = const DeskCom
-
-
-mkYesodSub "DeskCom"
-  [ClassP ''YesodDeskCom [VarT $ mkName "master"]]
-  [parseRoutes|
-  /  DeskComLoginR GET
-  /m DeskComMaybeLoginR GET
-|]
 
 
 -- | Redirect the user to Desk.com such that they're already
@@ -210,23 +205,25 @@ deskComLoginRoute = DeskComLoginR
 deskComMaybeLoginRoute :: Route DeskCom
 deskComMaybeLoginRoute = DeskComMaybeLoginR
 
-
 -- | Route used by the Desk.com remote authentication.  Works
 -- both when Desk.com call us and when we call them.  Forces user
 -- to be logged in.
-getDeskComLoginR :: YesodDeskCom master => GHandler DeskCom master ()
-getDeskComLoginR = requireAuthId >>= redirectToMultipass
+getDeskComLoginR :: YesodDeskCom master
+                 => HandlerT DeskCom (HandlerT master IO) ()
+getDeskComLoginR = lift $ requireAuthId >>= redirectToMultipass
 
 
 -- | Same as 'getDeskComLoginR' if the user is logged in,
 -- otherwise redirect to the Desk.com portal without asking for
 -- credentials.
-getDeskComMaybeLoginR :: YesodDeskCom master => GHandler DeskCom master ()
-getDeskComMaybeLoginR = maybeAuthId >>= maybe redirectToPortal redirectToMultipass
+getDeskComMaybeLoginR :: YesodDeskCom master
+                      => HandlerT DeskCom (HandlerT master IO) ()
+getDeskComMaybeLoginR = lift
+                      $ maybeAuthId >>= maybe redirectToPortal redirectToMultipass
 
 
 -- | Redirect the user to the main Desk.com portal.
-redirectToPortal :: YesodDeskCom master => GHandler DeskCom master ()
+redirectToPortal :: YesodDeskCom master => HandlerT master IO ()
 redirectToPortal = do
   y <- getYesod
   let DeskComCredentials {..} = deskComCredentials y
@@ -234,7 +231,9 @@ redirectToPortal = do
 
 
 -- | Redirect the user to the multipass login.
-redirectToMultipass :: YesodDeskCom master => AuthId master -> GHandler DeskCom master ()
+redirectToMultipass :: YesodDeskCom master
+                    => AuthId master
+                    -> HandlerT master IO ()
 redirectToMultipass uid = do
   -- Get generic info.
   y <- getYesod
@@ -249,6 +248,11 @@ redirectToMultipass uid = do
               UseYesodAuthId -> toPathPiece <$> requireAuthId
               Explicit x     -> return x
 
+  -- FIXME Desk.com now actually does have IV support. We should use it... but
+  -- I'm tired.
+  ivBS <- deskComRandomIV
+  let iv = AES.IV ivBS
+
   -- Create Multipass token.
   let toStrict = B.concat . BL.toChunks
       deskComEncode
@@ -256,7 +260,8 @@ redirectToMultipass uid = do
         . B64URL.encode                     -- base64url encoding
       encrypt
         = deskComEncode                     -- encode as modified base64url
-        . AES.encryptCBC dccAesKey blankIV  -- encrypt with AES128-CBC
+        . AES.encryptCBC dccAesKey iv       -- encrypt with AES128-CBC
+        . (ivBS <>)
         . Padding.padPKCS5 16               -- PKCS#5 padding
         . toStrict . A.encode . A.object    -- encode as JSON
       sign
@@ -278,9 +283,3 @@ redirectToMultipass uid = do
                       , "/customer/authentication/multipass/callback?"
                       , TE.decodeUtf8 (renderSimpleQuery False query)
                       ]
-
-
--- | A blank IV consisting of NUL bytes.  Yes, Desk.com's messy
--- crypto avoids using IVs!
-blankIV :: AES.IV
-blankIV = AES.IV (B.replicate 16 0)

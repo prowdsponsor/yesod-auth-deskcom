@@ -44,11 +44,15 @@ Library
                  , aeson             >= 0.6
                  , http-conduit
                  , http-types        >= 0.7
-                 , yesod-core        == 1.1.*
-                 , yesod-auth        == 1.1.*
+                 , yesod-core        == 1.2.*
+                 , yesod-auth        == 1.2.*
+                 , persistent
 
   Exposed-modules: Yesod.Auth.DeskCom
+  Other-modules: Yesod.Auth.DeskCom.Data
   Extensions:
+    ConstraintKinds
+    FlexibleContexts
     FlexibleInstances
     GADTs
     MultiParamTypeClasses
