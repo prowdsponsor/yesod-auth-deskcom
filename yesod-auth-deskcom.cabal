@@ -40,6 +40,7 @@ Library
                  , base64-bytestring >= 1.0
                  , cryptohash        >= 0.6
                  , cipher-aes        >= 0.1
+                 , cprng-aes         >= 0.3
                  , crypto-api        >= 0.10
                  , aeson             >= 0.6
                  , http-conduit

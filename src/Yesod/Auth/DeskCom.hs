@@ -7,7 +7,7 @@ module Yesod.Auth.DeskCom
     , DeskComUserId(..)
     , DeskComCustomField
     , DeskCom
-    , getDeskCom
+    , initDeskCom
     , deskComLoginRoute
     , deskComMaybeLoginRoute
     ) where
@@ -24,11 +24,13 @@ import qualified Crypto.Classes as Crypto
 import qualified Crypto.Hash.SHA1 as SHA1
 import qualified Crypto.HMAC as HMAC
 import qualified Crypto.Padding as Padding
+import qualified Crypto.Random.AESCtr as CPRNG
 import qualified Data.Aeson as A
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Base64.URL as B64URL
+import qualified Data.IORef as I
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Time as TI
@@ -79,9 +81,6 @@ class YesodAuthPersist master => YesodDeskCom master where
   -- with some sort of guest user should the user not be logged
   -- in.
   deskComUserInfo :: AuthId master -> HandlerT master IO DeskComUser
-
-  -- | Get a random 16-byte @ByteString@ to use as the IV.
-  deskComRandomIV :: HandlerT master IO B.ByteString
 
   -- | Each time we login an user on Desk.com, we create a token.
   -- This function defines how much time the token should be
@@ -181,11 +180,6 @@ type DeskComCustomField = (Text, Text)
 ----------------------------------------------------------------------
 
 
--- | Create a new 'DeskCom', use this on your @config/routes@ file.
-getDeskCom :: a -> DeskCom
-getDeskCom = const DeskCom
-
-
 -- | Redirect the user to Desk.com such that they're already
 -- logged in when they arrive.  For example, you may use
 -- @deskComLoginRoute@ as the login URL on Multipass config.
@@ -207,7 +201,7 @@ deskComMaybeLoginRoute = DeskComMaybeLoginR
 -- to be logged in.
 getDeskComLoginR :: YesodDeskCom master
                  => HandlerT DeskCom (HandlerT master IO) ()
-getDeskComLoginR = lift $ requireAuthId >>= redirectToMultipass
+getDeskComLoginR = lift requireAuthId >>= redirectToMultipass
 
 
 -- | Same as 'getDeskComLoginR' if the user is logged in,
@@ -215,14 +209,13 @@ getDeskComLoginR = lift $ requireAuthId >>= redirectToMultipass
 -- credentials.
 getDeskComMaybeLoginR :: YesodDeskCom master
                       => HandlerT DeskCom (HandlerT master IO) ()
-getDeskComMaybeLoginR = lift
-                      $ maybeAuthId >>= maybe redirectToPortal redirectToMultipass
+getDeskComMaybeLoginR = lift maybeAuthId >>= maybe redirectToPortal redirectToMultipass
 
 
 -- | Redirect the user to the main Desk.com portal.
-redirectToPortal :: YesodDeskCom master => HandlerT master IO ()
+redirectToPortal :: YesodDeskCom master => HandlerT DeskCom (HandlerT master IO) ()
 redirectToPortal = do
-  y <- getYesod
+  y <- lift getYesod
   let DeskComCredentials {..} = deskComCredentials y
   redirect $ T.concat [ "http://", dccDomain, "/" ]
 
@@ -230,25 +223,23 @@ redirectToPortal = do
 -- | Redirect the user to the multipass login.
 redirectToMultipass :: YesodDeskCom master
                     => AuthId master
-                    -> HandlerT master IO ()
+                    -> HandlerT DeskCom (HandlerT master IO) ()
 redirectToMultipass uid = do
   -- Get generic info.
-  y <- getYesod
+  y <- lift getYesod
   let DeskComCredentials {..} = deskComCredentials y
 
   -- Get the expires timestamp.
   expires <- TI.addUTCTime (deskComTokenTimeout y) <$> liftIO TI.getCurrentTime
 
   -- Get information about the currently logged user.
-  DeskComUser {..} <- deskComUserInfo uid
+  DeskComUser {..} <- lift (deskComUserInfo uid)
   userId <- case duUserId of
-              UseYesodAuthId -> toPathPiece <$> requireAuthId
+              UseYesodAuthId -> toPathPiece <$> lift requireAuthId
               Explicit x     -> return x
 
-  -- FIXME Desk.com now actually does have IV support. We should use it... but
-  -- I'm tired.
-  ivBS <- deskComRandomIV
-  let iv = AES.IV ivBS
+  -- Generate an IV.
+  iv@(AES.IV ivBS) <- deskComRandomIV
 
   -- Create Multipass token.
   let toStrict = B.concat . BL.toChunks
@@ -258,7 +249,7 @@ redirectToMultipass uid = do
       encrypt
         = deskComEncode                     -- encode as modified base64url
         . AES.encryptCBC dccAesKey iv       -- encrypt with AES128-CBC
-        . (ivBS <>)
+        . (ivBS <>)                         -- prepend the IV
         . Padding.padPKCS5 16               -- PKCS#5 padding
         . toStrict . A.encode . A.object    -- encode as JSON
       sign
@@ -280,3 +271,12 @@ redirectToMultipass uid = do
                       , "/customer/authentication/multipass/callback?"
                       , TE.decodeUtf8 (renderSimpleQuery False query)
                       ]
+
+
+-- | Randomly generate an IV.
+deskComRandomIV :: HandlerT DeskCom (HandlerT master IO) AES.IV
+deskComRandomIV = do
+  var <- deskComCprngVar <$> getYesod
+  liftIO $ I.atomicModifyIORef var $
+    \g -> let (bs, g') = CPRNG.genRandomBytes 16 g
+          in (g', g' `seq` AES.IV bs)
