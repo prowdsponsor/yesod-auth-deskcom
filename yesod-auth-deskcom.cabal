@@ -1,5 +1,5 @@
 Name:                yesod-auth-deskcom
-Version:             1.1
+Version:             1.2
 Synopsis:            Desk.com remote authentication support for Yesod apps.
 Homepage:            https://github.com/meteficha/yesod-auth-deskcom
 License:             BSD3
