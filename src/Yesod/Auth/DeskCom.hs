@@ -13,11 +13,9 @@ module Yesod.Auth.DeskCom
     ) where
 
 import Control.Applicative ((<$>))
-import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Default (Default(..))
 import Data.Monoid ((<>))
 import Data.Text (Text)
-import Language.Haskell.TH.Syntax (Pred(ClassP), Type(VarT), mkName)
 import Network.HTTP.Types (renderSimpleQuery)
 import Yesod.Auth
 import Yesod.Core
@@ -35,7 +33,6 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Time as TI
 import Yesod.Auth.DeskCom.Data
-import Database.Persist (Key)
 
 -- | Type class that you need to implement in order to support
 -- Desk.com remote authentication.
