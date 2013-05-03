@@ -30,24 +30,24 @@ Source-repository head
 Library
   hs-source-dirs: src
 
-  Build-depends:   base              >= 4.3     && < 5
-                 , time              >= 1.1     && < 2
+  Build-depends:   base                 >= 4.3     && < 5
+                 , time                 >= 1.1     && < 2
                  , template-haskell
-                 , transformers      >= 0.1.3   && < 0.4
-                 , bytestring        >= 0.9
-                 , text              >= 0.7     && < 0.12
+                 , transformers         >= 0.1.3   && < 0.4
+                 , bytestring           >= 0.9
+                 , text                 >= 0.7     && < 0.12
                  , data-default
-                 , base64-bytestring >= 1.0
-                 , cryptohash        >= 0.6
-                 , cipher-aes        >= 0.1
-                 , cprng-aes         >= 0.3
-                 , crypto-api        >= 0.10
-                 , aeson             >= 0.6
+                 , base64-bytestring    >= 1.0
+                 , cryptohash           >= 0.6
                  , cryptohash-cryptoapi >= 0.1
+                 , cipher-aes           >= 0.1
+                 , cprng-aes            >= 0.3
+                 , crypto-api           >= 0.10
+                 , aeson                >= 0.6
                  , http-conduit
-                 , http-types        >= 0.7
-                 , yesod-core        == 1.2.*
-                 , yesod-auth        == 1.2.*
+                 , http-types           >= 0.7
+                 , yesod-core           == 1.2.*
+                 , yesod-auth           == 1.2.*
 
   Exposed-modules: Yesod.Auth.DeskCom
   Other-modules: Yesod.Auth.DeskCom.Data
