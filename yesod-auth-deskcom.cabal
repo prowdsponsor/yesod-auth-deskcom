@@ -43,6 +43,7 @@ Library
                  , cprng-aes         >= 0.3
                  , crypto-api        >= 0.10
                  , aeson             >= 0.6
+                 , cryptohash-cryptoapi >= 0.1
                  , http-conduit
                  , http-types        >= 0.7
                  , yesod-core        == 1.2.*

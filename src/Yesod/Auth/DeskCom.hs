@@ -13,6 +13,7 @@ module Yesod.Auth.DeskCom
     ) where
 
 import Control.Applicative ((<$>))
+import Crypto.Hash.CryptoAPI (SHA1)
 import Data.Default (Default(..))
 import Data.Monoid ((<>))
 import Data.Text (Text)
@@ -107,7 +108,7 @@ deskComCreateCreds site domain apiKey = DeskComCredentials site domain aesKey hm
   where
     -- Yes, I know, Desk.com's crypto is messy.
     aesKey  = AES.initKey . B.take 16 . SHA1.hash . TE.encodeUtf8 $ apiKey <> site
-    hmacKey = HMAC.MacKey $ TE.encodeUtf8 apiKey
+    hmacKey = TE.encodeUtf8 apiKey
 
 
 -- | Credentials used to access your Desk.com's Multipass.
@@ -116,7 +117,7 @@ data DeskComCredentials =
     { dccSite    :: !T.Text
     , dccDomain  :: !T.Text
     , dccAesKey  :: !AES.Key
-    , dccHmacKey :: !(HMAC.MacKey SHA1.Ctx SHA1.SHA1)
+    , dccHmacKey :: !B.ByteString -- HMAC.MacKey ?????? SHA1
     }
 
 
@@ -254,7 +255,9 @@ redirectToMultipass uid = do
         . toStrict . A.encode . A.object    -- encode as JSON
       sign
         = B64.encode . Crypto.encode        -- encode as normal base64 (why??? =[)
-        . HMAC.hmac' dccHmacKey             -- sign using HMAC-SHA1
+        . HMAC.hmac' hmacKey                -- sign using HMAC-SHA1
+      hmacKey :: HMAC.MacKey ctx SHA1
+      hmacKey = HMAC.MacKey dccHmacKey
       multipass = encrypt $
                     "uid"            A..= userId  :
                     "expires"        A..= expires :
