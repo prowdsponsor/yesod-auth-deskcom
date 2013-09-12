@@ -46,7 +46,7 @@ class YesodAuthPersist master => YesodDeskCom master where
   -- 'deskComCreateCreds'.  We recommend caching the resulting
   -- 'DeskComCredentials' value on your foundation data type
   -- since creating it is an expensive operation.
-  deskComCredentials :: master -> DeskComCredentials
+  deskComCredentials :: HandlerT master IO DeskComCredentials
 
   -- | Gather information that should be given to Desk.com about
   -- an user.  Please see 'DeskComUser' for more information
@@ -216,8 +216,7 @@ getDeskComMaybeLoginR = lift maybeAuthId >>= maybe redirectToPortal redirectToMu
 -- | Redirect the user to the main Desk.com portal.
 redirectToPortal :: YesodDeskCom master => HandlerT DeskCom (HandlerT master IO) ()
 redirectToPortal = do
-  y <- lift getYesod
-  let DeskComCredentials {..} = deskComCredentials y
+  DeskComCredentials {..} <- deskComCredentials
   redirect $ T.concat [ "http://", dccDomain, "/" ]
 
 
@@ -227,8 +226,8 @@ redirectToMultipass :: YesodDeskCom master
                     -> HandlerT DeskCom (HandlerT master IO) ()
 redirectToMultipass uid = do
   -- Get generic info.
-  y <- lift getYesod
-  let DeskComCredentials {..} = deskComCredentials y
+  y <- getYesod
+  DeskComCredentials {..} <- deskComCredentials
 
   -- Get the expires timestamp.
   expires <- TI.addUTCTime (deskComTokenTimeout y) <$> liftIO TI.getCurrentTime
