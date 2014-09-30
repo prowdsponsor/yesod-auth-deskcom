@@ -41,8 +41,9 @@ Library
                  , cryptohash           >= 0.6
                  , cryptohash-cryptoapi >= 0.1
                  , cipher-aes           >= 0.1
-                 , cprng-aes            >= 0.3
+                 , cprng-aes            >= 0.5
                  , crypto-api           >= 0.10
+                 , crypto-random        >= 0.0.8   && < 0.1
                  , aeson                >= 0.6
                  , http-conduit
                  , http-types           >= 0.7
@@ -58,6 +59,7 @@ Library
     GADTs
     MultiParamTypeClasses
     OverloadedStrings
+    PackageImports
     QuasiQuotes
     RecordWildCards
     TemplateHaskell
