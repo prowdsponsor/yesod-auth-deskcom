@@ -215,7 +215,7 @@ getDeskComMaybeLoginR = lift maybeAuthId >>= maybe redirectToPortal redirectToMu
 -- | Redirect the user to the main Desk.com portal.
 redirectToPortal :: YesodDeskCom master => HandlerT DeskCom (HandlerT master IO) ()
 redirectToPortal = do
-  DeskComCredentials {..} <- deskComCredentials
+  DeskComCredentials {..} <- lift deskComCredentials
   redirect $ T.concat [ "http://", dccDomain, "/" ]
 
 
@@ -225,8 +225,8 @@ redirectToMultipass :: YesodDeskCom master
                     -> HandlerT DeskCom (HandlerT master IO) ()
 redirectToMultipass uid = do
   -- Get generic info.
-  y <- getYesod
-  DeskComCredentials {..} <- deskComCredentials
+  y <- lift getYesod
+  DeskComCredentials {..} <- lift deskComCredentials
 
   -- Get the expires timestamp.
   expires <- TI.addUTCTime (deskComTokenTimeout y) <$> liftIO TI.getCurrentTime
