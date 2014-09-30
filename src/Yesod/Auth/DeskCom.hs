@@ -13,7 +13,6 @@ module Yesod.Auth.DeskCom
     ) where
 
 import Control.Applicative ((<$>))
-import Crypto.Hash.CryptoAPI (SHA1)
 import Data.Default (Default(..))
 import Data.Monoid ((<>))
 import Data.Text (Text)
@@ -21,11 +20,11 @@ import Network.HTTP.Types (renderSimpleQuery)
 import Yesod.Auth
 import Yesod.Core
 import qualified Crypto.Cipher.AES as AES
-import qualified Crypto.Classes as Crypto
 import qualified Crypto.Hash.SHA1 as SHA1
-import qualified Crypto.HMAC as HMAC
 import qualified Crypto.Padding as Padding
 import qualified "crypto-random" Crypto.Random
+import Crypto.Hash (hmac, SHA1, Digest, hmacGetDigest)
+import Data.Byteable (toBytes)
 import qualified Data.Aeson as A
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
@@ -253,10 +252,10 @@ redirectToMultipass uid = do
         . Padding.padPKCS5 16               -- PKCS#5 padding
         . toStrict . A.encode . A.object    -- encode as JSON
       sign
-        = B64.encode . Crypto.encode        -- encode as normal base64 (why??? =[)
-        . HMAC.hmac' hmacKey                -- sign using HMAC-SHA1
-      hmacKey :: HMAC.MacKey ctx SHA1
-      hmacKey = HMAC.MacKey dccHmacKey
+        = B64.encode                        -- encode as normal base64 (why??? =[)
+        . (toBytes :: Digest SHA1 -> B.ByteString)
+        . hmacGetDigest
+        . hmac dccHmacKey                   -- sign using HMAC-SHA1
       multipass = encrypt $
                     "uid"            A..= userId  :
                     "expires"        A..= expires :

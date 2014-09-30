@@ -39,7 +39,6 @@ Library
                  , data-default
                  , base64-bytestring    >= 1.0
                  , cryptohash           >= 0.6
-                 , cryptohash-cryptoapi >= 0.1
                  , cipher-aes           >= 0.1
                  , cprng-aes            >= 0.5
                  , crypto-api           >= 0.10
@@ -49,6 +48,7 @@ Library
                  , http-types           >= 0.7
                  , yesod-core           == 1.4.*
                  , yesod-auth           == 1.4.*
+                 , byteable
 
   Exposed-modules: Yesod.Auth.DeskCom
   Other-modules: Yesod.Auth.DeskCom.Data
