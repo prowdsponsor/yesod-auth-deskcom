@@ -13,7 +13,6 @@ module Yesod.Auth.DeskCom
     ) where
 
 import Control.Applicative ((<$>))
-import Crypto.Hash.CryptoAPI (SHA1)
 import Data.Default (Default(..))
 import Data.Monoid ((<>))
 import Data.Text (Text)
@@ -21,11 +20,11 @@ import Network.HTTP.Types (renderSimpleQuery)
 import Yesod.Auth
 import Yesod.Core
 import qualified Crypto.Cipher.AES as AES
-import qualified Crypto.Classes as Crypto
 import qualified Crypto.Hash.SHA1 as SHA1
-import qualified Crypto.HMAC as HMAC
 import qualified Crypto.Padding as Padding
-import qualified Crypto.Random.AESCtr as CPRNG
+import qualified "crypto-random" Crypto.Random
+import Crypto.Hash (hmac, SHA1, Digest, hmacGetDigest)
+import Data.Byteable (toBytes)
 import qualified Data.Aeson as A
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
@@ -46,7 +45,7 @@ class YesodAuthPersist master => YesodDeskCom master where
   -- 'deskComCreateCreds'.  We recommend caching the resulting
   -- 'DeskComCredentials' value on your foundation data type
   -- since creating it is an expensive operation.
-  deskComCredentials :: master -> DeskComCredentials
+  deskComCredentials :: HandlerT master IO DeskComCredentials
 
   -- | Gather information that should be given to Desk.com about
   -- an user.  Please see 'DeskComUser' for more information
@@ -107,7 +106,7 @@ deskComCreateCreds ::
 deskComCreateCreds site domain apiKey = DeskComCredentials site domain aesKey hmacKey
   where
     -- Yes, I know, Desk.com's crypto is messy.
-    aesKey  = AES.initKey . B.take 16 . SHA1.hash . TE.encodeUtf8 $ apiKey <> site
+    aesKey  = AES.initAES . B.take 16 . SHA1.hash . TE.encodeUtf8 $ apiKey <> site
     hmacKey = TE.encodeUtf8 apiKey
 
 
@@ -116,7 +115,7 @@ data DeskComCredentials =
   DeskComCredentials
     { dccSite    :: !T.Text
     , dccDomain  :: !T.Text
-    , dccAesKey  :: !AES.Key
+    , dccAesKey  :: !AES.AES
     , dccHmacKey :: !B.ByteString -- HMAC.MacKey ?????? SHA1
     }
 
@@ -216,8 +215,7 @@ getDeskComMaybeLoginR = lift maybeAuthId >>= maybe redirectToPortal redirectToMu
 -- | Redirect the user to the main Desk.com portal.
 redirectToPortal :: YesodDeskCom master => HandlerT DeskCom (HandlerT master IO) ()
 redirectToPortal = do
-  y <- lift getYesod
-  let DeskComCredentials {..} = deskComCredentials y
+  DeskComCredentials {..} <- lift deskComCredentials
   redirect $ T.concat [ "http://", dccDomain, "/" ]
 
 
@@ -228,7 +226,7 @@ redirectToMultipass :: YesodDeskCom master
 redirectToMultipass uid = do
   -- Get generic info.
   y <- lift getYesod
-  let DeskComCredentials {..} = deskComCredentials y
+  DeskComCredentials {..} <- lift deskComCredentials
 
   -- Get the expires timestamp.
   expires <- TI.addUTCTime (deskComTokenTimeout y) <$> liftIO TI.getCurrentTime
@@ -240,7 +238,7 @@ redirectToMultipass uid = do
               Explicit x     -> return x
 
   -- Generate an IV.
-  iv@(AES.IV ivBS) <- deskComRandomIV
+  iv <- deskComRandomIV
 
   -- Create Multipass token.
   let toStrict = B.concat . BL.toChunks
@@ -250,14 +248,14 @@ redirectToMultipass uid = do
       encrypt
         = deskComEncode                     -- encode as modified base64url
         . AES.encryptCBC dccAesKey iv       -- encrypt with AES128-CBC
-        . (ivBS <>)                         -- prepend the IV
+        . (iv <>)                           -- prepend the IV
         . Padding.padPKCS5 16               -- PKCS#5 padding
         . toStrict . A.encode . A.object    -- encode as JSON
       sign
-        = B64.encode . Crypto.encode        -- encode as normal base64 (why??? =[)
-        . HMAC.hmac' hmacKey                -- sign using HMAC-SHA1
-      hmacKey :: HMAC.MacKey ctx SHA1
-      hmacKey = HMAC.MacKey dccHmacKey
+        = B64.encode                        -- encode as normal base64 (why??? =[)
+        . (toBytes :: Digest SHA1 -> B.ByteString)
+        . hmacGetDigest
+        . hmac dccHmacKey                   -- sign using HMAC-SHA1
       multipass = encrypt $
                     "uid"            A..= userId  :
                     "expires"        A..= expires :
@@ -277,9 +275,9 @@ redirectToMultipass uid = do
 
 
 -- | Randomly generate an IV.
-deskComRandomIV :: HandlerT DeskCom (HandlerT master IO) AES.IV
+deskComRandomIV :: HandlerT DeskCom (HandlerT master IO) B.ByteString
 deskComRandomIV = do
   var <- deskComCprngVar <$> getYesod
   liftIO $ I.atomicModifyIORef var $
-    \g -> let (bs, g') = CPRNG.genRandomBytes 16 g
-          in (g', g' `seq` AES.IV bs)
+    \g -> let (bs, g') = Crypto.Random.cprgGenerate 16 g
+          in (g', g' `seq` bs)
